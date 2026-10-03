@@ -2336,20 +2336,22 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
     return null;
   })();
 
-  const removeManagedOrphan = async () => {
-    // Only a leftover directory inside a managed worktree root may be deleted;
-    // an arbitrary unregistered path is never removed recursively. The data-dir
-    // root stays accepted so worktrees created before the setting was
-    // introduced remain removable.
+  const removeManagedOrphan = async ({ registered }: { registered: boolean }) => {
+    // The data-dir root is ours alone, so any leftover inside it may go. A
+    // configured worktree.directory can be shared (".." is the repository's
+    // parent, holding sibling projects), so there only a directory git had
+    // registered as this project's worktree is deleted; an unregistered one
+    // could be anything.
     const worktreeRootCanonical = await canonicalPath(context.worktreeRoot);
     const legacyWorktreeRootCanonical = context.legacyWorktreeRoot
       ? await canonicalPath(context.legacyWorktreeRoot)
       : null;
-    const isManagedOrphan = (targetCanonical !== worktreeRootCanonical
-      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical))
-      || (legacyWorktreeRootCanonical !== null
-        && targetCanonical !== legacyWorktreeRootCanonical
-        && isInsideOrSameDirectory(legacyWorktreeRootCanonical, targetCanonical));
+    const insideLegacyRoot = legacyWorktreeRootCanonical !== null
+      && targetCanonical !== legacyWorktreeRootCanonical
+      && isInsideOrSameDirectory(legacyWorktreeRootCanonical, targetCanonical);
+    const insideConfiguredRoot = targetCanonical !== worktreeRootCanonical
+      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
+    const isManagedOrphan = insideLegacyRoot || (registered && insideConfiguredRoot);
     const targetExists = await checkPathExists(targetDirectory);
     if (targetExists && isManagedOrphan) {
       await removeBusyDirectory(targetDirectory);
@@ -2360,7 +2362,7 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   };
 
   if (!matchedEntry?.worktree) {
-    await removeManagedOrphan();
+    await removeManagedOrphan({ registered: false });
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
@@ -2373,7 +2375,7 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical);
   if (!removedByGit) {
     // Git deleted its registration but not the still-locked folder.
-    await removeManagedOrphan();
+    await removeManagedOrphan({ registered: true });
   }
 
   if (deleteLocalBranch) {

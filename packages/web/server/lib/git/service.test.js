@@ -1782,6 +1782,28 @@ describe('createWorktree with OpenCode worktree.directory', () => {
     expect(fs.existsSync(legacyOrphan)).toBe(false);
   }));
 
+  it('leaves an unregistered directory alone when the configured folder is the repository parent', withDataHome(async () => {
+    if (!canRunGit()) return;
+
+    const parent = createTempDir();
+    const repo = path.join(parent, 'project');
+    fs.mkdirSync(repo);
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.writeFileSync(path.join(repo, 'opencode.json'), JSON.stringify({ worktree: { directory: '..' } }));
+
+    const sibling = path.join(parent, 'sibling-project');
+    fs.mkdirSync(sibling);
+    fs.writeFileSync(path.join(sibling, 'keep.txt'), 'x');
+
+    await removeWorktree(repo, { directory: sibling });
+    expect(fs.existsSync(path.join(sibling, 'keep.txt'))).toBe(true);
+  }));
+
   it('still removes a worktree when the project config cannot be read', withDataHome(async (dataHome) => {
     if (!canRunGit()) return;
 

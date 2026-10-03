@@ -5245,15 +5245,18 @@ export async function removeWorktree(directory, input = {}) {
     return null;
   })();
 
-  const removeManagedOrphan = async () => {
-    // Accept the data-dir root too so worktrees created before the setting was
-    // introduced stay removable. Both roots bound recursive deletion; an
-    // unrelated directory is still refused.
-    const isManagedOrphan = (targetCanonical !== worktreeRootCanonical
-      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical))
-      || (legacyWorktreeRootCanonical !== null
-        && targetCanonical !== legacyWorktreeRootCanonical
-        && isInsideOrSameDirectory(legacyWorktreeRootCanonical, targetCanonical));
+  const removeManagedOrphan = async ({ registered }) => {
+    // The data-dir root is ours alone, so any leftover inside it may go. A
+    // configured worktree.directory can be shared (".." is the repository's
+    // parent, holding sibling projects), so there only a directory git had
+    // registered as this project's worktree is deleted; an unregistered one
+    // could be anything.
+    const insideLegacyRoot = legacyWorktreeRootCanonical !== null
+      && targetCanonical !== legacyWorktreeRootCanonical
+      && isInsideOrSameDirectory(legacyWorktreeRootCanonical, targetCanonical);
+    const insideConfiguredRoot = targetCanonical !== worktreeRootCanonical
+      && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
+    const isManagedOrphan = insideLegacyRoot || (registered && insideConfiguredRoot);
 
     const targetExists = await checkPathExists(targetDirectory);
     if (targetExists && isManagedOrphan) {
@@ -5265,7 +5268,7 @@ export async function removeWorktree(directory, input = {}) {
   };
 
   if (!matchedEntry?.worktree) {
-    await removeManagedOrphan();
+    await removeManagedOrphan({ registered: false });
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
@@ -5278,7 +5281,7 @@ export async function removeWorktree(directory, input = {}) {
   const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical);
   if (!removedByGit) {
     // Git deleted its registration but not the still-locked folder.
-    await removeManagedOrphan();
+    await removeManagedOrphan({ registered: true });
   }
   await publishWorktreeTopologyChange(context.primaryWorktree);
 
